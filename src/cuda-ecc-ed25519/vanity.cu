@@ -22,6 +22,7 @@
 #include "ge.cu"
 #include "sha512.cu"
 #include "../config.h"
+#define MAX_NUM_GPUS 8
 
 /* -- Types ----------------------------------------------------------------- */
 
@@ -147,13 +148,13 @@ void vanity_run(config &vanity) {
 	printf("Running on %d GPUs\n", gpuCount);
 	
 	// Allocate device memory for results
-	int* dev_keys_found[MAX_NUM_GPUS];
-	int* dev_executions_this_gpu[MAX_NUM_GPUS];
+	int* dev_keys_found[MAX_NUM_GPUS] = {nullptr};
+	int* dev_executions_this_gpu[MAX_NUM_GPUS] = {nullptr};
 	
 	for (int g = 0; g < gpuCount; ++g) {
 		cudaSetDevice(g);
-		cudaMalloc((void**)&dev_keys_found[g], sizeof(int));
-		cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));
+		cudaMalloc(&dev_keys_found[g], sizeof(int));
+		cudaMalloc(&dev_executions_this_gpu[g], sizeof(int));
 		cudaMemset(dev_keys_found[g], 0, sizeof(int));
 		cudaMemset(dev_executions_this_gpu[g], 0, sizeof(int));
 	}
