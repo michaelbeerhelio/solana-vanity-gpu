@@ -28,6 +28,7 @@
 typedef struct {
 	// CUDA Random States.
 	curandState*    states[8];
+	int             gpu_id;
 } config;
 
 /* -- Prototypes, Because C++ ----------------------------------------------- */
@@ -75,54 +76,48 @@ unsigned long long int makeSeed() {
 /* -- Vanity Step Functions ------------------------------------------------- */
 
 void vanity_setup(config &vanity) {
-	printf("GPU: Initializing Memory\n");
-	int gpuCount = 0;
-	cudaGetDeviceCount(&gpuCount);
+	printf("GPU: Initializing Memory for GPU %d\n", vanity.gpu_id);
+	cudaSetDevice(vanity.gpu_id);
 
-	// Create random states so kernels have access to random generators
-	// while running in the GPU.
-	for (int i = 0; i < gpuCount; ++i) {
-		cudaSetDevice(i);
+	// Fetch Device Properties
+	cudaDeviceProp device;
+	cudaGetDeviceProperties(&device, vanity.gpu_id);
 
-		// Fetch Device Properties
-		cudaDeviceProp device;
-		cudaGetDeviceProperties(&device, i);
+	// Calculate Occupancy
+	int blockSize       = 0,
+	    minGridSize     = 0,
+	    maxActiveBlocks = 0;
+	cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
+	cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0);
 
-		// Calculate Occupancy
-		int blockSize       = 0,
-		    minGridSize     = 0,
-		    maxActiveBlocks = 0;
-		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
-		cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0);
-
-		// Output Device Details
-		// 
-		// Our kernels currently don't take advantage of data locality
-		// or how warp execution works, so each thread can be thought
-		// of as a totally independent thread of execution (bad). On
-		// the bright side, this means we can really easily calculate
-		// maximum occupancy for a GPU because we don't have to care
-		// about building blocks well. Essentially we're trading away
-		// GPU SIMD ability for standard parallelism, which CPUs are
-		// better at and GPUs suck at.
-		//
-		// Next Weekend Project: ^ Fix this.
-		printf("GPU: %d (%s <%d, %d, %d>) -- W: %d, P: %d, TPB: %d, MTD: (%dx, %dy, %dz), MGS: (%dx, %dy, %dz)\n",
-			i,
-			device.name,
-			blockSize,
-			minGridSize,
-			maxActiveBlocks,
-			device.warpSize,
-			device.multiProcessorCount,
-		       	device.maxThreadsPerBlock,
-			device.maxThreadsDim[0],
-			device.maxThreadsDim[1],
-			device.maxThreadsDim[2],
-			device.maxGridSize[0],
-			device.maxGridSize[1],
-			device.maxGridSize[2]
-		);
+	// Output Device Details
+	// 
+	// Our kernels currently don't take advantage of data locality
+	// or how warp execution works, so each thread can be thought
+	// of as a totally independent thread of execution (bad). On
+	// the bright side, this means we can really easily calculate
+	// maximum occupancy for a GPU because we don't have to care
+	// about building blocks well. Essentially we're trading away
+	// GPU SIMD ability for standard parallelism, which CPUs are
+	// better at and GPUs suck at.
+	//
+	// Next Weekend Project: ^ Fix this.
+	printf("GPU: %d (%s <%d, %d, %d>) -- W: %d, P: %d, TPB: %d, MTD: (%dx, %dy, %dz), MGS: (%dx, %dy, %dz)\n",
+		vanity.gpu_id,
+		device.name,
+		blockSize,
+		minGridSize,
+		maxActiveBlocks,
+		device.warpSize,
+		device.multiProcessorCount,
+	       	device.maxThreadsPerBlock,
+		device.maxThreadsDim[0],
+		device.maxThreadsDim[1],
+		device.maxThreadsDim[2],
+		device.maxGridSize[0],
+		device.maxGridSize[1],
+		device.maxGridSize[2]
+	);
 
                 // the random number seed is uniquely generated each time the program 
                 // is run, from the operating system entropy
@@ -134,16 +129,12 @@ void vanity_setup(config &vanity) {
 	        cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int));		
                 cudaMemcpy( dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice ); 
 
-		cudaMalloc((void **)&(vanity.states[i]), maxActiveBlocks * blockSize * sizeof(curandState));
-		vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states[i]);
-	}
-
-	printf("END: Initializing Memory\n");
+		cudaMalloc((void **)&(vanity.states[vanity.gpu_id]), maxActiveBlocks * blockSize * sizeof(curandState));
+		vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states[vanity.gpu_id]);
 }
 
 void vanity_run(config &vanity) {
-	int gpuCount = 0;
-	cudaGetDeviceCount(&gpuCount);
+	cudaSetDevice(vanity.gpu_id);
 
 	unsigned long long int  executions_total = 0; 
 	unsigned long long int  executions_this_iteration; 
@@ -155,7 +146,7 @@ void vanity_run(config &vanity) {
         int* dev_keys_found[100];
 
     // Initialize device memory outside the loop
-    for (int g = 0; g < gpuCount; ++g) {
+    for (int g = 0; g < 1; ++g) {
         cudaSetDevice(g);
         
         // Allocate and initialize keys found counter
@@ -174,14 +165,14 @@ void vanity_run(config &vanity) {
                 executions_this_iteration=0;
 
 		// Reset counters at the start of each iteration
-		for (int g = 0; g < gpuCount; ++g) {
+		for (int g = 0; g < 1; ++g) {
 			int zero = 0;
 			cudaMemcpy(dev_keys_found[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
 			cudaMemcpy(dev_executions_this_gpu[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
 		}
 
 		// Run on all GPUs
-		for (int g = 0; g < gpuCount; ++g) {
+		for (int g = 0; g < 1; ++g) {
 			cudaSetDevice(g);
 			int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
 			cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
@@ -206,7 +197,7 @@ void vanity_run(config &vanity) {
 		cudaDeviceSynchronize();
 		auto finish = std::chrono::high_resolution_clock::now();
 
-		for (int g = 0; g < gpuCount; ++g) {
+		for (int g = 0; g < 1; ++g) {
                 	cudaMemcpy( &keys_found_this_iteration, dev_keys_found[g], sizeof(int), cudaMemcpyDeviceToHost ); 
                 	keys_found_total += keys_found_this_iteration; 
 			//printf("GPU %d found %d keys\n",g,keys_found_this_iteration);
@@ -548,4 +539,13 @@ bool __device__ b58enc(
 	*b58sz = i + 1;
 	
 	return true;
+}
+
+extern "C" {
+    void init_vanity(int gpu_id) {
+        config vanity;
+        vanity.gpu_id = gpu_id;
+        vanity_setup(vanity);
+        vanity_run(vanity);
+    }
 }

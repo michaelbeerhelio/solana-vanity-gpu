@@ -90,10 +90,15 @@ $V/$(ECC_TEST_BIN): $V/ecc_main.o $V/lib$(LIB).so
 
 $V/ecc_scan.o: $(addprefix $(ECC_DIR)/,vanity.cu ed25519.h)
 	@mkdir -p $(@D)
-	$(NVCC) -rdc=true $(CFLAGS) -c $< -o $@
+	$(NVCC) -rdc=true $(CFLAGS) -Xcompiler "-fPIC" -c $< -o $@
 
 $V/$(ECC_SCAN_BIN): $V/ecc_scan.o $V/lib$(LIB).so
 	$(NVCC) $(CFLAGS) -L$V -l$(LIB) $< -o $@
+
+cuda_ed25519_vanity_shared: $V/ecc_scan.o
+	@mkdir -p $(@D)
+	$(NVCC) -rdc=true $(CFLAGS) -Xcompiler "-fPIC" --shared \
+		-o $V/libcuda-ed25519-vanity.so $V/ecc_scan.o
 
 .PHONY:clean
 clean:

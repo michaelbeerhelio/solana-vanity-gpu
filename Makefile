@@ -25,3 +25,10 @@ endif
 .PHONY:clean
 clean:
 	$(MAKE) V=$(V) -C src clean
+
+cuda_ed25519_vanity_lib:
+	$(MAKE) V=$(V) -C src cuda_ed25519_vanity_shared
+
+install_lib: cuda_ed25519_vanity_lib
+	mkdir -p $(DESTDIR)
+	cp -f src/$(V)/libcuda-ed25519-vanity.so $(DESTDIR)
