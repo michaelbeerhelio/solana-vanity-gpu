@@ -12,9 +12,12 @@ def load_cuda_lib():
         Path("/home/ray/solana-vanity-gpu/src/release/libcuda-ed25519-vanity.so")
     ]
     
-    for lib_path in possible_paths:
-        if lib_path.exists():
-            return ctypes.CDLL(str(lib_path))
+    print("Current directory:", os.getcwd())
+    print("Looking for library in:")
+    for path in possible_paths:
+        print(f"  {path} (exists: {path.exists()})")
+        if path.exists():
+            return ctypes.CDLL(str(path))
             
     raise RuntimeError(f"CUDA library not found in any of: {[str(p) for p in possible_paths]}")
 
