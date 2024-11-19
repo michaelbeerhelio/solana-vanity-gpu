@@ -6,7 +6,7 @@ import os
 @ray.remote(num_gpus=1)
 class VanityGenerator:
     def __init__(self):
-        lib_path = Path("src/release/libcuda-ed25519-vanity.so")
+        lib_path = Path.home() / "solana-vanity-gpu/src/release/libcuda-ed25519-vanity.so"
         if not lib_path.exists():
             raise RuntimeError(f"CUDA library not found at {lib_path}")
             
@@ -22,16 +22,8 @@ class VanityGenerator:
         self.lib.init_vanity(0)
 
 def main():
-    # Initialize Ray with runtime environment
-    ray.init(
-        address='auto',
-        runtime_env={
-            "working_dir": ".",
-            "excludes": ["**/cuda_ed25519_vanity"]
-        }
-    )
+    ray.init(address='auto')
     
-    # Get available GPUs
     gpu_count = int(ray.available_resources().get('GPU', 0))
     if gpu_count == 0:
         raise RuntimeError("No GPUs available through Ray")
