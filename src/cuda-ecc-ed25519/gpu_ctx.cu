@@ -15,8 +15,13 @@ static int32_t g_total_gpus = -1;
 
 static bool cuda_crypt_init_locked() {
     if (g_total_gpus == -1) {
+        // Reset all devices first
+        cudaDeviceReset();
+        
         const char* visible_devices = getenv("CUDA_VISIBLE_DEVICES");
-        printf("CUDA_VISIBLE_DEVICES: %s\n", visible_devices);
+        if (visible_devices) {
+            printf("CUDA_VISIBLE_DEVICES: %s\n", visible_devices);
+        }
         
         cudaError_t err = cudaGetDeviceCount(&g_total_gpus);
         if (err != cudaSuccess) {
@@ -24,16 +29,10 @@ static bool cuda_crypt_init_locked() {
             return false;
         }
         
-        if (g_total_gpus == 0) {
-            fprintf(stderr, "No CUDA devices available\n");
-            return false;
-        }
-        
         printf("Raw device count: %d\n", g_total_gpus);
-        g_total_gpus = min(MAX_NUM_GPUS, g_total_gpus);
-        printf("Using %d GPUs (limited by MAX_NUM_GPUS=%d)\n", g_total_gpus, MAX_NUM_GPUS);
         
-        for (int gpu = 0; gpu < g_total_gpus; gpu++) {
+        // Don't limit GPUs yet - initialize all available ones
+        for (int gpu = 0; gpu < g_total_gpus && gpu < MAX_NUM_GPUS; gpu++) {
             cudaSetDevice(gpu);
             cudaDeviceProp prop;
             err = cudaGetDeviceProperties(&prop, gpu);
@@ -45,10 +44,8 @@ static bool cuda_crypt_init_locked() {
             
             printf("Initializing GPU %d: %s (Compute %d.%d)\n", 
                    gpu, prop.name, prop.major, prop.minor);
-            printf("  Memory: %lu MB\n", prop.totalGlobalMem / (1024*1024));
-            printf("  Multiprocessors: %d\n", prop.multiProcessorCount);
-            printf("  Max threads per block: %d\n", prop.maxThreadsPerBlock);
             
+            // Initialize streams and mutexes for this GPU
             for (int queue = 0; queue < MAX_QUEUE_SIZE; queue++) {
                 int mutex_err = pthread_mutex_init(&g_gpu_ctx[gpu][queue].mutex, NULL);
                 if (mutex_err != 0) {
@@ -64,7 +61,6 @@ static bool cuda_crypt_init_locked() {
                     continue;
                 }
             }
-            printf("  Successfully initialized all %d queues\n", MAX_QUEUE_SIZE);
         }
     }
     return g_total_gpus > 0;

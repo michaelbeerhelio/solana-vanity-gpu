@@ -28,7 +28,7 @@
 
 typedef struct {
 	// CUDA Random States.
-	curandState*    states[8];
+	curandState*    states[MAX_NUM_GPUS];
 	int            gpuCount;
 } config;
 
