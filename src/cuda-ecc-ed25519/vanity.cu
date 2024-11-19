@@ -542,31 +542,25 @@ bool __device__ b58enc(
 }
 
 extern "C" {
-    config* create_config(int gpu_id) {
-        config* cfg = new config();
-        cfg->gpu_id = gpu_id;
-        return cfg;
+    struct Config {
+        curandState* states[8];
+        int gpu_id;
+    };
+
+    void create_config(Config** cfg, int gpu_id) {
+        *cfg = new Config();
+        (*cfg)->gpu_id = gpu_id;
     }
 
-    void destroy_config(config* cfg) {
-        delete cfg;
-    }
-
-    void vanity_setup_gpu(config* cfg) {
-        vanity_setup(*cfg);
-    }
-
-    void vanity_run_gpu(config* cfg) {
-        vanity_run(*cfg);
-    }
-
-    void init_vanity(int gpu_id) {
-        // Set device based on passed GPU ID
-        cudaSetDevice(gpu_id);
-        
+    void vanity_setup(Config* cfg) {
         config vanity;
-        vanity.gpu_id = gpu_id;
+        vanity.gpu_id = cfg->gpu_id;
         vanity_setup(vanity);
+    }
+
+    void vanity_run(Config* cfg) {
+        config vanity;
+        vanity.gpu_id = cfg->gpu_id;
         vanity_run(vanity);
     }
 }
