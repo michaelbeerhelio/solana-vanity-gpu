@@ -12,6 +12,24 @@ typedef struct {
     cudaStream_t stream;
 } gpu_ctx_t;
 
+typedef struct {
+    uint8_t* packets;
+    uint32_t* message_lens;
+    uint32_t* public_key_offsets;
+    uint32_t* private_key_offsets;
+    uint32_t* signature_offsets;
+    uint32_t* message_start_offsets;
+    uint32_t* out;
+    size_t packets_size_bytes;
+    size_t out_size_bytes;
+    size_t offsets_len;
+} verify_ctx_t;
+
+typedef struct {
+    void* elems;
+    size_t num;
+} gpu_Elems;
+
 extern int32_t g_total_gpus;
 bool cuda_crypt_init();
 bool ed25519_init();
