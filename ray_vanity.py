@@ -30,15 +30,18 @@ def load_cuda_lib():
 class VanityGenerator:
     def __init__(self):
         self.lib = load_cuda_lib()
+        # Get the actual GPU ID from CUDA_VISIBLE_DEVICES
         self.gpu_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
         print(f"Initialized VanityGenerator on GPU {self.gpu_id}")
         
     def generate(self):
         print(f"Starting generation on GPU {self.gpu_id}")
-        self.lib.init_vanity(self.gpu_id)
+        # Pass the local GPU ID (0) since CUDA_VISIBLE_DEVICES handles mapping
+        self.lib.init_vanity(0)
 
 def main():
-    ray.init()
+    # Initialize Ray first
+    ray.init(address='auto')
     
     # Get available GPUs
     gpu_count = int(ray.available_resources().get('GPU', 0))

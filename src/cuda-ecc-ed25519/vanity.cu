@@ -561,6 +561,9 @@ extern "C" {
     }
 
     void init_vanity(int gpu_id) {
+        // Set device based on passed GPU ID
+        cudaSetDevice(gpu_id);
+        
         config vanity;
         vanity.gpu_id = gpu_id;
         vanity_setup(vanity);
