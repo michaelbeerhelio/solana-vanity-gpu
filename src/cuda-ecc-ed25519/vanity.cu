@@ -191,9 +191,6 @@ void vanity_run(config &vanity) {
 	                cudaMalloc((void**)&dev_g, sizeof(int));
                 	cudaMemcpy( dev_g, &g, sizeof(int), cudaMemcpyHostToDevice ); 
 
-	                cudaMalloc((void**)&dev_keys_found[g], sizeof(int));		
-	                cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));		
-
 			vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states[g], dev_keys_found[g], dev_g, dev_executions_this_gpu[g]);
 			cudaFree(dev_g);
 		}
@@ -211,9 +208,9 @@ void vanity_run(config &vanity) {
                 	keys_found_total += keys_found_this_iteration; 
 			//printf("GPU %d found %d keys\n",g,keys_found_this_iteration);
 
-                	cudaMemcpy( &executions_this_gpu, dev_executions_this_gpu[g], sizeof(int), cudaMemcpyDeviceToHost ); 
-                	executions_this_iteration += executions_this_gpu * ATTEMPTS_PER_EXECUTION; 
-                	executions_total += executions_this_gpu * ATTEMPTS_PER_EXECUTION; 
+                	cudaMemcpy(&executions_this_gpu, dev_executions_this_gpu[g], sizeof(int), cudaMemcpyDeviceToHost);
+					executions_this_iteration += executions_this_gpu * ATTEMPTS_PER_EXECUTION;
+					executions_total += executions_this_gpu * ATTEMPTS_PER_EXECUTION;
                         //printf("GPU %d executions: %d\n",g,executions_this_gpu);
 		}
 
@@ -235,6 +232,12 @@ void vanity_run(config &vanity) {
 		}	
 	}
 
+	// Cleanup device memory
+	for (int g = 0; g < gpuCount; ++g) {
+		cudaFree(dev_keys_found[g]);
+		cudaFree(dev_executions_this_gpu[g]);
+	}
+
 	printf("Iterations complete, Done!\n");
 }
 
@@ -248,9 +251,12 @@ void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
 void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* exec_count) {
 	int id = threadIdx.x + (blockIdx.x * blockDim.x);
 
-        atomicAdd(exec_count, 1);
-
-	// SMITH - should really be passed in, but hey ho
+    // Each thread only adds 1 to represent its ATTEMPTS_PER_EXECUTION
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        *exec_count = gridDim.x * blockDim.x;
+    }
+    
+    // SMITH - should really be passed in, but hey ho
     	int prefix_letter_counts[MAX_PATTERNS];
     	for (unsigned int n = 0; n < sizeof(prefixes) / sizeof(prefixes[0]); ++n) {
         	if ( MAX_PATTERNS == n ) {
