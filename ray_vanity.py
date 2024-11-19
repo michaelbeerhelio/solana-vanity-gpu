@@ -7,26 +7,24 @@ import os
 def load_cuda_lib():
     # Get the runtime context to identify the node
     runtime_env = ray.get_runtime_context()
-    node_id = runtime_env.node_id
+    node_id = runtime_env.get_node_id()
     print(f"Running on node: {node_id}")
     
-    # Use local /tmp directory for each node
-    lib_path = Path(f"/tmp/libcuda-ed25519-vanity_{node_id}.so")
+    # First try local project directory
+    lib_paths = [
+        Path("/home/ray/solana-vanity-gpu/src/release/libcuda-ed25519-vanity.so"),
+        Path(os.path.dirname(os.path.abspath(__file__))) / "src" / "release" / "libcuda-ed25519-vanity.so"
+    ]
     
-    # Copy from source if running on head node
-    source_lib = Path("/home/ray/solana-vanity-gpu/src/release/libcuda-ed25519-vanity.so")
-    if source_lib.exists():
-        import shutil
-        shutil.copy2(source_lib, lib_path)
-        print(f"Copied library to {lib_path}")
-    
-    if not lib_path.exists():
-        raise RuntimeError(f"CUDA library not found at {lib_path}")
-    
-    lib = ctypes.CDLL(str(lib_path))
-    lib.init_vanity.argtypes = [ctypes.c_int]
-    lib.init_vanity.restype = None
-    return lib
+    for lib_path in lib_paths:
+        print(f"Trying library path: {lib_path}")
+        if lib_path.exists():
+            lib = ctypes.CDLL(str(lib_path))
+            lib.init_vanity.argtypes = [ctypes.c_int]
+            lib.init_vanity.restype = None
+            return lib
+            
+    raise RuntimeError(f"CUDA library not found in any of: {lib_paths}")
 
 @ray.remote(num_gpus=1)
 class VanityGenerator:
