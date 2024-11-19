@@ -8,10 +8,10 @@ static pthread_mutex_t g_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define MAX_NUM_GPUS 8
 #define MAX_QUEUE_SIZE 8
 
+int32_t g_total_gpus = -1;
 static gpu_ctx_t g_gpu_ctx[MAX_NUM_GPUS][MAX_QUEUE_SIZE] = {0};
 static uint32_t g_cur_gpu = 0;
 static uint32_t g_cur_queue[MAX_NUM_GPUS] = {0};
-static int32_t g_total_gpus = -1;
 
 static bool cuda_crypt_init_locked() {
     if (g_total_gpus == -1) {
@@ -64,6 +64,13 @@ static bool cuda_crypt_init_locked() {
         }
     }
     return g_total_gpus > 0;
+}
+
+bool cuda_crypt_init() {
+    pthread_mutex_lock(&g_ctx_mutex);
+    bool success = cuda_crypt_init_locked();
+    pthread_mutex_unlock(&g_ctx_mutex);
+    return success;
 }
 
 bool ed25519_init() {
