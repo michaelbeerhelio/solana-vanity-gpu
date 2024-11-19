@@ -8,12 +8,6 @@
 #define MAX_QUEUE_SIZE 8
 
 typedef struct {
-    pthread_mutex_t mutex;
-    cudaStream_t stream;
-    verify_ctx_t verify_ctx;
-} gpu_ctx_t;
-
-typedef struct {
     uint8_t* packets;
     uint32_t* message_lens;
     uint32_t* public_key_offsets;
@@ -25,6 +19,12 @@ typedef struct {
     size_t out_size_bytes;
     size_t offsets_len;
 } verify_ctx_t;
+
+typedef struct {
+    pthread_mutex_t mutex;
+    cudaStream_t stream;
+    verify_ctx_t verify_ctx;
+} gpu_ctx_t;
 
 extern int32_t g_total_gpus;
 bool cuda_crypt_init();
