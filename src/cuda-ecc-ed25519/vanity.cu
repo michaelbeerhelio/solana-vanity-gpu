@@ -78,12 +78,6 @@ void vanity_setup(config &vanity) {
 	printf("GPU: Initializing Memory\n");
 	int gpuCount = 0;
 	cudaGetDeviceCount(&gpuCount);
-	printf("Detected %d GPUs\n", gpuCount);
-	
-	if (gpuCount == 0) {
-		printf("No CUDA capable devices found!\n");
-		exit(1);
-	}
 
 	// Create random states so kernels have access to random generators
 	// while running in the GPU.
@@ -222,15 +216,15 @@ void vanity_run(config &vanity) {
 
 		// Print out performance Summary
 		std::chrono::duration<double> elapsed = finish - start;
-		// printf("%s Iteration %d Attempts: %llu in %f at %fcps - Total Attempts %llu - keys found %d\n",
-		// 	getTimeStr().c_str(),
-		// 	i+1,
-		// 	executions_this_iteration, //(8 * 8 * 256 * 100000),
-		// 	elapsed.count(),
-		// 	executions_this_iteration / elapsed.count(),
-		// 	executions_total,
-		// 	keys_found_total
-		// );
+		printf("%s Iteration %d Attempts: %llu in %.2f at %.2f keys/sec - Total Attempts %llu - Keys Found %d\n",
+			getTimeStr().c_str(),
+			i+1,
+			executions_this_iteration,
+			elapsed.count(),
+			executions_this_iteration / elapsed.count(),
+			executions_total,
+			keys_found_total
+		);
 
                 if ( keys_found_total >= STOP_AFTER_KEYS_FOUND ) {
                 	printf("Enough keys found, Done! \n");
