@@ -22,7 +22,7 @@ CUDA_SHA256_DIR:=cuda-sha256
 
 CFLAGS+=-DENDIAN_NEUTRAL -DLTC_NO_ASM -I$(CUDA_HEADER_DIR) -I$(CUDA_SHA256_DIR)
 
-all: $V/$(ECC_SCAN_BIN) $(V)/lib$(LIB).so
+all: $V/$(ECC_SCAN_BIN) $(V)/lib$(LIB).so $V/$(ECC_SCAN_SHARED)
 
 ECC_DIR:=cuda-ecc-ed25519
 
@@ -97,14 +97,14 @@ $V/$(ECC_SCAN_BIN): $V/ecc_scan.o $V/lib$(LIB).so
 
 ECC_SCAN_SHARED=cuda_ed25519_vanity_shared
 
-$V/$(ECC_SCAN_SHARED): $(ECC_DIR)/vanity.cu
+$V/$(ECC_SCAN_SHARED): $V/ecc_scan.o $V/lib$(LIB).so
 	@mkdir -p $(@D)
 	$(NVCC) -rdc=true $(CFLAGS) -Xcompiler "-fPIC" --shared \
-		-o $V/libcuda-ed25519-vanity.so $< \
+		-o $V/libcuda-ed25519-vanity.so $< -L$V -l$(LIB) \
 		-I$(CUDA_HEADER_DIR) \
 		-I$(CUDA_SHA256_DIR)
 
-.PHONY: $(ECC_SCAN_SHARED)
+.PHONY: clean $(ECC_SCAN_SHARED)
 
 .PHONY:clean
 clean:
