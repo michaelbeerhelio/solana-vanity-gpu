@@ -5,7 +5,7 @@ import os
 
 # Load the CUDA library
 def load_cuda_lib():
-    lib_path = Path(__file__).parent / "release" / "libcuda-ed25519-vanity.so"
+    lib_path = Path(__file__).parent / "src" / "release" / "libcuda-ed25519-vanity.so"
     if not lib_path.exists():
         raise RuntimeError(f"CUDA library not found at {lib_path}")
     return ctypes.CDLL(str(lib_path))
