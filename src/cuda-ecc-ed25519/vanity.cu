@@ -542,10 +542,21 @@ bool __device__ b58enc(
 }
 
 extern "C" {
-    void init_vanity(int gpu_id) {
-        config vanity;
-        vanity.gpu_id = gpu_id;
-        vanity_setup(vanity);
-        vanity_run(vanity);
+    config* create_config(int gpu_id) {
+        config* cfg = new config();
+        cfg->gpu_id = gpu_id;
+        return cfg;
+    }
+
+    void destroy_config(config* cfg) {
+        delete cfg;
+    }
+
+    void vanity_setup_gpu(config* cfg) {
+        vanity_setup(*cfg);
+    }
+
+    void vanity_run_gpu(config* cfg) {
+        vanity_run(*cfg);
     }
 }
