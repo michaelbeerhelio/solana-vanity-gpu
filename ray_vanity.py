@@ -5,20 +5,20 @@ import os
 
 # Load the CUDA library
 def load_cuda_lib():
-    # Get paths
-    source_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    worker_dir = Path("/home/ray/solana-vanity-gpu")
-    lib_dir = worker_dir / "src" / "release"
-    lib_path = lib_dir / "libcuda-ed25519-vanity.so"
+    # Get the runtime context to identify the node
+    runtime_env = ray.get_runtime_context()
+    node_id = runtime_env.node_id
+    print(f"Running on node: {node_id}")
     
-    # Create directories if they don't exist
-    lib_dir.mkdir(parents=True, exist_ok=True)
+    # Use local /tmp directory for each node
+    lib_path = Path(f"/tmp/libcuda-ed25519-vanity_{node_id}.so")
     
-    # Copy library from source if it exists
-    source_lib = source_dir / "src" / "release" / "libcuda-ed25519-vanity.so"
+    # Copy from source if running on head node
+    source_lib = Path("/home/ray/solana-vanity-gpu/src/release/libcuda-ed25519-vanity.so")
     if source_lib.exists():
         import shutil
         shutil.copy2(source_lib, lib_path)
+        print(f"Copied library to {lib_path}")
     
     if not lib_path.exists():
         raise RuntimeError(f"CUDA library not found at {lib_path}")
