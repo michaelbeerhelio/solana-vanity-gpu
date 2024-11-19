@@ -15,11 +15,8 @@ static int32_t g_total_gpus = -1;
 
 static bool cuda_crypt_init_locked() {
     if (g_total_gpus == -1) {
-        // Get GPU count from environment variable if available
-        const char* ray_gpu_ids = getenv("CUDA_VISIBLE_DEVICES");
-        if (ray_gpu_ids) {
-            printf("Ray GPU IDs: %s\n", ray_gpu_ids);
-        }
+        const char* visible_devices = getenv("CUDA_VISIBLE_DEVICES");
+        printf("CUDA_VISIBLE_DEVICES: %s\n", visible_devices);
         
         cudaError_t err = cudaGetDeviceCount(&g_total_gpus);
         if (err != cudaSuccess) {
@@ -27,25 +24,47 @@ static bool cuda_crypt_init_locked() {
             return false;
         }
         
-        printf("Detected %d CUDA devices\n", g_total_gpus);
+        if (g_total_gpus == 0) {
+            fprintf(stderr, "No CUDA devices available\n");
+            return false;
+        }
+        
+        printf("Raw device count: %d\n", g_total_gpus);
         g_total_gpus = min(MAX_NUM_GPUS, g_total_gpus);
+        printf("Using %d GPUs (limited by MAX_NUM_GPUS=%d)\n", g_total_gpus, MAX_NUM_GPUS);
         
         for (int gpu = 0; gpu < g_total_gpus; gpu++) {
+            cudaSetDevice(gpu);
             cudaDeviceProp prop;
-            CUDA_CHK(cudaGetDeviceProperties(&prop, gpu));
-            printf("GPU %d: %s\n", gpu, prop.name);
-            
-            CUDA_CHK(cudaSetDevice(gpu));
-            for (int queue = 0; queue < MAX_QUEUE_SIZE; queue++) {
-                int err = pthread_mutex_init(&g_gpu_ctx[gpu][queue].mutex, NULL);
-                if (err != 0) {
-                    fprintf(stderr, "pthread_mutex_init error %d gpu: %d queue: %d\n",
-                            err, gpu, queue);
-                    g_total_gpus = 0;
-                    return false;
-                }
-                CUDA_CHK(cudaStreamCreate(&g_gpu_ctx[gpu][queue].stream));
+            err = cudaGetDeviceProperties(&prop, gpu);
+            if (err != cudaSuccess) {
+                fprintf(stderr, "Failed to get properties for GPU %d: %s\n", 
+                        gpu, cudaGetErrorString(err));
+                continue;
             }
+            
+            printf("Initializing GPU %d: %s (Compute %d.%d)\n", 
+                   gpu, prop.name, prop.major, prop.minor);
+            printf("  Memory: %lu MB\n", prop.totalGlobalMem / (1024*1024));
+            printf("  Multiprocessors: %d\n", prop.multiProcessorCount);
+            printf("  Max threads per block: %d\n", prop.maxThreadsPerBlock);
+            
+            for (int queue = 0; queue < MAX_QUEUE_SIZE; queue++) {
+                int mutex_err = pthread_mutex_init(&g_gpu_ctx[gpu][queue].mutex, NULL);
+                if (mutex_err != 0) {
+                    fprintf(stderr, "pthread_mutex_init error %d gpu: %d queue: %d\n",
+                            mutex_err, gpu, queue);
+                    continue;
+                }
+                
+                err = cudaStreamCreate(&g_gpu_ctx[gpu][queue].stream);
+                if (err != cudaSuccess) {
+                    fprintf(stderr, "Failed to create stream for GPU %d queue %d: %s\n",
+                            gpu, queue, cudaGetErrorString(err));
+                    continue;
+                }
+            }
+            printf("  Successfully initialized all %d queues\n", MAX_QUEUE_SIZE);
         }
     }
     return g_total_gpus > 0;

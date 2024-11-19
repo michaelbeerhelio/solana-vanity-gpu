@@ -144,6 +144,19 @@ void vanity_setup(config &vanity) {
 void vanity_run(config &vanity) {
 	int gpuCount = 0;
 	cudaGetDeviceCount(&gpuCount);
+	printf("Running on %d GPUs\n", gpuCount);
+	
+	// Allocate device memory for results
+	int* dev_keys_found[MAX_NUM_GPUS];
+	int* dev_executions_this_gpu[MAX_NUM_GPUS];
+	
+	for (int g = 0; g < gpuCount; ++g) {
+		cudaSetDevice(g);
+		cudaMalloc((void**)&dev_keys_found[g], sizeof(int));
+		cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));
+		cudaMemset(dev_keys_found[g], 0, sizeof(int));
+		cudaMemset(dev_executions_this_gpu[g], 0, sizeof(int));
+	}
 
 	unsigned long long int  executions_total = 0; 
 	unsigned long long int  executions_this_iteration; 
@@ -153,20 +166,6 @@ void vanity_run(config &vanity) {
         int  keys_found_total = 0;
         int  keys_found_this_iteration;
         int* dev_keys_found[100];
-
-    // Initialize device memory outside the loop
-    for (int g = 0; g < gpuCount; ++g) {
-        cudaSetDevice(g);
-        
-        // Allocate and initialize keys found counter
-        cudaMalloc((void**)&dev_keys_found[g], sizeof(int));
-        int zero = 0;
-        cudaMemcpy(dev_keys_found[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
-        
-        // Allocate and initialize executions counter
-        cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));
-        cudaMemcpy(dev_executions_this_gpu[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
-    }
 
 	for (int i = 0; i < MAX_ITERATIONS; ++i) {
 		auto start  = std::chrono::high_resolution_clock::now();
@@ -216,15 +215,15 @@ void vanity_run(config &vanity) {
 
 		// Print out performance Summary
 		std::chrono::duration<double> elapsed = finish - start;
-		printf("%s Iteration %d Attempts: %llu in %.2f at %.2f keys/sec - Total Attempts %llu - Keys Found %d\n",
-			getTimeStr().c_str(),
-			i+1,
-			executions_this_iteration,
-			elapsed.count(),
-			executions_this_iteration / elapsed.count(),
-			executions_total,
-			keys_found_total
-		);
+		// printf("%s Iteration %d Attempts: %llu in %.2f at %.2f keys/sec - Total Attempts %llu - Keys Found %d\n",
+		// 	getTimeStr().c_str(),
+		// 	i+1,
+		// 	executions_this_iteration,
+		// 	elapsed.count(),
+		// 	executions_this_iteration / elapsed.count(),
+		// 	executions_total,
+		// 	keys_found_total
+		// );
 
                 if ( keys_found_total >= STOP_AFTER_KEYS_FOUND ) {
                 	printf("Enough keys found, Done! \n");
