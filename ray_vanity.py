@@ -3,14 +3,7 @@ import ctypes
 from pathlib import Path
 import os
 
-@ray.remote(
-    num_gpus=1,
-    runtime_env={
-        "working_dir": ".",
-        "py_modules": [],
-        "excludes": ["**/__pycache__"]
-    }
-)
+@ray.remote(num_gpus=1)
 class VanityGenerator:
     def __init__(self):
         # Get current working directory from Ray
@@ -34,7 +27,15 @@ class VanityGenerator:
         self.lib.init_vanity(0)
 
 def main():
-    ray.init(address='auto')
+    # Initialize Ray with runtime environment
+    ray.init(
+        address='auto',
+        runtime_env={
+            "working_dir": ".",
+            "py_modules": [],
+            "excludes": ["**/__pycache__"]
+        }
+    )
     
     gpu_count = int(ray.available_resources().get('GPU', 0))
     if gpu_count == 0:
