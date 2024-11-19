@@ -22,21 +22,19 @@
 #include "ge.cu"
 #include "sha512.cu"
 #include "../config.h"
-#define MAX_NUM_GPUS 8
 
 /* -- Types ----------------------------------------------------------------- */
 
 typedef struct {
 	// CUDA Random States.
-	curandState*    states[MAX_NUM_GPUS];
-	int            gpuCount;
+	curandState*    states[8];
 } config;
 
 /* -- Prototypes, Because C++ ----------------------------------------------- */
 
 void            vanity_setup(config& vanity);
 void            vanity_run(config& vanity);
-void __global__ vanity_init(unsigned long long int seed, curandState* state);
+void __global__ vanity_init(unsigned long long int* seed, curandState* state);
 void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* execution_count);
 bool __device__ b58enc(char* b58, size_t* b58sz, uint8_t* data, size_t binsz);
 
@@ -78,74 +76,97 @@ unsigned long long int makeSeed() {
 
 void vanity_setup(config &vanity) {
 	printf("GPU: Initializing Memory\n");
-	
-	// Initialize CUDA context first
-	if (!cuda_crypt_init()) {
-		fprintf(stderr, "Failed to initialize CUDA context\n");
-		exit(1);
-	}
-	
-	// Get the number of GPUs from the initialized context
-	vanity.gpuCount = g_total_gpus;
-	printf("Using %d GPUs from CUDA context\n", vanity.gpuCount);
-	
-	// Initialize curand states for each GPU
-	for (int i = 0; i < vanity.gpuCount; ++i) {
+	int gpuCount = 0;
+	cudaGetDeviceCount(&gpuCount);
+
+	// Create random states so kernels have access to random generators
+	// while running in the GPU.
+	for (int i = 0; i < gpuCount; ++i) {
 		cudaSetDevice(i);
-		
-		// Calculate number of threads per block and blocks per grid
-		int blockSize = 0, minGridSize = 0;
+
+		// Fetch Device Properties
+		cudaDeviceProp device;
+		cudaGetDeviceProperties(&device, i);
+
+		// Calculate Occupancy
+		int blockSize       = 0,
+		    minGridSize     = 0,
+		    maxActiveBlocks = 0;
 		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
-		
-		// Allocate and initialize random states for this GPU
-		curandState* states;
-		int numThreads = blockSize * minGridSize;
-		cudaMalloc(&states, numThreads * sizeof(curandState));
-		
-		// Initialize random states
-		unsigned long long int seed = makeSeed();
-		printf("Initialising GPU %d from entropy: %llu\n", i, seed);
-		vanity_init<<<minGridSize, blockSize>>>(seed, states);
-		cudaDeviceSynchronize();
-		
-		// Store the states in our config
-		vanity.states[i] = states;
+		cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0);
+
+		// Output Device Details
+		// 
+		// Our kernels currently don't take advantage of data locality
+		// or how warp execution works, so each thread can be thought
+		// of as a totally independent thread of execution (bad). On
+		// the bright side, this means we can really easily calculate
+		// maximum occupancy for a GPU because we don't have to care
+		// about building blocks well. Essentially we're trading away
+		// GPU SIMD ability for standard parallelism, which CPUs are
+		// better at and GPUs suck at.
+		//
+		// Next Weekend Project: ^ Fix this.
+		printf("GPU: %d (%s <%d, %d, %d>) -- W: %d, P: %d, TPB: %d, MTD: (%dx, %dy, %dz), MGS: (%dx, %dy, %dz)\n",
+			i,
+			device.name,
+			blockSize,
+			minGridSize,
+			maxActiveBlocks,
+			device.warpSize,
+			device.multiProcessorCount,
+		       	device.maxThreadsPerBlock,
+			device.maxThreadsDim[0],
+			device.maxThreadsDim[1],
+			device.maxThreadsDim[2],
+			device.maxGridSize[0],
+			device.maxGridSize[1],
+			device.maxGridSize[2]
+		);
+
+                // the random number seed is uniquely generated each time the program 
+                // is run, from the operating system entropy
+
+		unsigned long long int rseed = makeSeed();
+		printf("Initialising from entropy: %llu\n",rseed);
+
+		unsigned long long int* dev_rseed;
+	        cudaMalloc((void**)&dev_rseed, sizeof(unsigned long long int));		
+                cudaMemcpy( dev_rseed, &rseed, sizeof(unsigned long long int), cudaMemcpyHostToDevice ); 
+
+		cudaMalloc((void **)&(vanity.states[i]), maxActiveBlocks * blockSize * sizeof(curandState));
+		vanity_init<<<maxActiveBlocks, blockSize>>>(dev_rseed, vanity.states[i]);
 	}
-	
+
 	printf("END: Initializing Memory\n");
 }
 
 void vanity_run(config &vanity) {
-	printf("Running on %d GPUs\n", vanity.gpuCount);
-	
-	// Allocate device memory for results
-	int* dev_keys_found[MAX_NUM_GPUS] = {nullptr};
-	int* dev_executions_this_gpu[MAX_NUM_GPUS] = {nullptr};
-	
-	for (int g = 0; g < vanity.gpuCount; ++g) {
-		cudaError_t err = cudaSetDevice(g);
-		if (err != cudaSuccess) {
-			fprintf(stderr, "Failed to set device %d: %s\n", g, cudaGetErrorString(err));
-			continue;
-		}
-		
-		cudaMalloc(&dev_keys_found[g], sizeof(int));
-		cudaMalloc(&dev_executions_this_gpu[g], sizeof(int));
-		cudaMemset(dev_keys_found[g], 0, sizeof(int));
-		cudaMemset(dev_executions_this_gpu[g], 0, sizeof(int));
-		
-		// Verify device is still set correctly
-		int currentDevice;
-		cudaGetDevice(&currentDevice);
-		printf("Initialized memory for GPU %d (current device: %d)\n", g, currentDevice);
-	}
+	int gpuCount = 0;
+	cudaGetDeviceCount(&gpuCount);
 
 	unsigned long long int  executions_total = 0; 
 	unsigned long long int  executions_this_iteration; 
 	int  executions_this_gpu; 
+        int* dev_executions_this_gpu[100];
 
-	int  keys_found_total = 0;
-	int  keys_found_this_iteration;
+        int  keys_found_total = 0;
+        int  keys_found_this_iteration;
+        int* dev_keys_found[100];
+
+    // Initialize device memory outside the loop
+    for (int g = 0; g < gpuCount; ++g) {
+        cudaSetDevice(g);
+        
+        // Allocate and initialize keys found counter
+        cudaMalloc((void**)&dev_keys_found[g], sizeof(int));
+        int zero = 0;
+        cudaMemcpy(dev_keys_found[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
+        
+        // Allocate and initialize executions counter
+        cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));
+        cudaMemcpy(dev_executions_this_gpu[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
+    }
 
 	for (int i = 0; i < MAX_ITERATIONS; ++i) {
 		auto start  = std::chrono::high_resolution_clock::now();
@@ -153,14 +174,14 @@ void vanity_run(config &vanity) {
                 executions_this_iteration=0;
 
 		// Reset counters at the start of each iteration
-		for (int g = 0; g < vanity.gpuCount; ++g) {
+		for (int g = 0; g < gpuCount; ++g) {
 			int zero = 0;
 			cudaMemcpy(dev_keys_found[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
 			cudaMemcpy(dev_executions_this_gpu[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
 		}
 
 		// Run on all GPUs
-		for (int g = 0; g < vanity.gpuCount; ++g) {
+		for (int g = 0; g < gpuCount; ++g) {
 			cudaSetDevice(g);
 			int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
 			cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
@@ -169,6 +190,9 @@ void vanity_run(config &vanity) {
 			int* dev_g;
 	                cudaMalloc((void**)&dev_g, sizeof(int));
                 	cudaMemcpy( dev_g, &g, sizeof(int), cudaMemcpyHostToDevice ); 
+
+	                cudaMalloc((void**)&dev_keys_found[g], sizeof(int));		
+	                cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));		
 
 			vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states[g], dev_keys_found[g], dev_g, dev_executions_this_gpu[g]);
 			cudaFree(dev_g);
@@ -182,28 +206,28 @@ void vanity_run(config &vanity) {
 		cudaDeviceSynchronize();
 		auto finish = std::chrono::high_resolution_clock::now();
 
-		for (int g = 0; g < vanity.gpuCount; ++g) {
+		for (int g = 0; g < gpuCount; ++g) {
                 	cudaMemcpy( &keys_found_this_iteration, dev_keys_found[g], sizeof(int), cudaMemcpyDeviceToHost ); 
                 	keys_found_total += keys_found_this_iteration; 
 			//printf("GPU %d found %d keys\n",g,keys_found_this_iteration);
 
-                	cudaMemcpy(&executions_this_gpu, dev_executions_this_gpu[g], sizeof(int), cudaMemcpyDeviceToHost);
-					executions_this_iteration += executions_this_gpu * ATTEMPTS_PER_EXECUTION;
-					executions_total += executions_this_gpu * ATTEMPTS_PER_EXECUTION;
+                	cudaMemcpy( &executions_this_gpu, dev_executions_this_gpu[g], sizeof(int), cudaMemcpyDeviceToHost ); 
+                	executions_this_iteration += executions_this_gpu * ATTEMPTS_PER_EXECUTION; 
+                	executions_total += executions_this_gpu * ATTEMPTS_PER_EXECUTION; 
                         //printf("GPU %d executions: %d\n",g,executions_this_gpu);
 		}
 
 		// Print out performance Summary
 		std::chrono::duration<double> elapsed = finish - start;
-		// printf("%s Iteration %d Attempts: %llu in %.2f at %.2f keys/sec - Total Attempts %llu - Keys Found %d\n",
-		// 	getTimeStr().c_str(),
-		// 	i+1,
-		// 	executions_this_iteration,
-		// 	elapsed.count(),
-		// 	executions_this_iteration / elapsed.count(),
-		// 	executions_total,
-		// 	keys_found_total
-		// );
+		printf("%s Iteration %d Attempts: %llu in %f at %fcps - Total Attempts %llu - keys found %d\n",
+			getTimeStr().c_str(),
+			i+1,
+			executions_this_iteration, //(8 * 8 * 256 * 100000),
+			elapsed.count(),
+			executions_this_iteration / elapsed.count(),
+			executions_total,
+			keys_found_total
+		);
 
                 if ( keys_found_total >= STOP_AFTER_KEYS_FOUND ) {
                 	printf("Enough keys found, Done! \n");
@@ -211,31 +235,22 @@ void vanity_run(config &vanity) {
 		}	
 	}
 
-	// Cleanup device memory
-	for (int g = 0; g < vanity.gpuCount; ++g) {
-		cudaFree(dev_keys_found[g]);
-		cudaFree(dev_executions_this_gpu[g]);
-	}
-
 	printf("Iterations complete, Done!\n");
 }
 
 /* -- CUDA Vanity Functions ------------------------------------------------- */
 
-void __global__ vanity_init(unsigned long long int seed, curandState* state) {
+void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
 	int id = threadIdx.x + (blockIdx.x * blockDim.x);  
-	curand_init(seed, id, 0, &state[id]);
+	curand_init(*rseed + id, id, 0, &state[id]);
 }
 
 void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* exec_count) {
 	int id = threadIdx.x + (blockIdx.x * blockDim.x);
 
-    // Each thread only adds 1 to represent its ATTEMPTS_PER_EXECUTION
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        *exec_count = gridDim.x * blockDim.x;
-    }
-    
-    // SMITH - should really be passed in, but hey ho
+        atomicAdd(exec_count, 1);
+
+	// SMITH - should really be passed in, but hey ho
     	int prefix_letter_counts[MAX_PATTERNS];
     	for (unsigned int n = 0; n < sizeof(prefixes) / sizeof(prefixes[0]); ++n) {
         	if ( MAX_PATTERNS == n ) {
