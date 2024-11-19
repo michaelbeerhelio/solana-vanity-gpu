@@ -8,69 +8,31 @@ static pthread_mutex_t g_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define MAX_NUM_GPUS 8
 #define MAX_QUEUE_SIZE 8
 
-int32_t g_total_gpus = -1;
 static gpu_ctx_t g_gpu_ctx[MAX_NUM_GPUS][MAX_QUEUE_SIZE] = {0};
 static uint32_t g_cur_gpu = 0;
 static uint32_t g_cur_queue[MAX_NUM_GPUS] = {0};
+static int32_t g_total_gpus = -1;
 
 static bool cuda_crypt_init_locked() {
     if (g_total_gpus == -1) {
-        // Reset all devices first
-        cudaDeviceReset();
+        cudaGetDeviceCount(&g_total_gpus);
+        g_total_gpus = min(MAX_NUM_GPUS, g_total_gpus);
         LOG("total_gpus: %d\n", g_total_gpus);
-        const char* visible_devices = getenv("CUDA_VISIBLE_DEVICES");
-        if (visible_devices) {
-            printf("CUDA_VISIBLE_DEVICES: %s\n", visible_devices);
-        }
-        
-        cudaError_t err = cudaGetDeviceCount(&g_total_gpus);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "Failed to get GPU count: %s\n", cudaGetErrorString(err));
-            return false;
-        }
-        
-        printf("Raw device count: %d\n", g_total_gpus);
-        
-        // Don't limit GPUs yet - initialize all available ones
-        for (int gpu = 0; gpu < g_total_gpus && gpu < MAX_NUM_GPUS; gpu++) {
-            cudaSetDevice(gpu);
-            cudaDeviceProp prop;
-            err = cudaGetDeviceProperties(&prop, gpu);
-            if (err != cudaSuccess) {
-                fprintf(stderr, "Failed to get properties for GPU %d: %s\n", 
-                        gpu, cudaGetErrorString(err));
-                continue;
-            }
-            
-            printf("Initializing GPU %d: %s (Compute %d.%d)\n", 
-                   gpu, prop.name, prop.major, prop.minor);
-            
-            // Initialize streams and mutexes for this GPU
+        for (int gpu = 0; gpu < g_total_gpus; gpu++) {
+            CUDA_CHK(cudaSetDevice(gpu));
             for (int queue = 0; queue < MAX_QUEUE_SIZE; queue++) {
-                int mutex_err = pthread_mutex_init(&g_gpu_ctx[gpu][queue].mutex, NULL);
-                if (mutex_err != 0) {
+                int err = pthread_mutex_init(&g_gpu_ctx[gpu][queue].mutex, NULL);
+                if (err != 0) {
                     fprintf(stderr, "pthread_mutex_init error %d gpu: %d queue: %d\n",
-                            mutex_err, gpu, queue);
-                    continue;
+                            err, gpu, queue);
+                    g_total_gpus = 0;
+                    return false;
                 }
-                
-                err = cudaStreamCreate(&g_gpu_ctx[gpu][queue].stream);
-                if (err != cudaSuccess) {
-                    fprintf(stderr, "Failed to create stream for GPU %d queue %d: %s\n",
-                            gpu, queue, cudaGetErrorString(err));
-                    continue;
-                }
+                CUDA_CHK(cudaStreamCreate(&g_gpu_ctx[gpu][queue].stream));
             }
         }
     }
     return g_total_gpus > 0;
-}
-
-bool cuda_crypt_init() {
-    pthread_mutex_lock(&g_ctx_mutex);
-    bool success = cuda_crypt_init_locked();
-    pthread_mutex_unlock(&g_ctx_mutex);
-    return success;
 }
 
 bool ed25519_init() {
@@ -84,9 +46,11 @@ bool ed25519_init() {
 gpu_ctx_t* get_gpu_ctx() {
     int32_t cur_gpu, cur_queue;
 
+    LOG("locking global mutex");
     pthread_mutex_lock(&g_ctx_mutex);
     if (!cuda_crypt_init_locked()) {
         pthread_mutex_unlock(&g_ctx_mutex);
+        LOG("No GPUs, exiting...\n");
         return NULL;
     }
     cur_gpu = g_cur_gpu;
@@ -98,12 +62,17 @@ gpu_ctx_t* get_gpu_ctx() {
     pthread_mutex_unlock(&g_ctx_mutex);
 
     gpu_ctx_t* cur_ctx = &g_gpu_ctx[cur_gpu][cur_queue];
+    LOG("locking contex mutex queue: %d gpu: %d", cur_queue, cur_gpu);
     pthread_mutex_lock(&cur_ctx->mutex);
-    cudaSetDevice(cur_gpu);
+
+    CUDA_CHK(cudaSetDevice(cur_gpu));
+
+    LOG("selecting gpu: %d queue: %d\n", cur_gpu, cur_queue);
+
     return cur_ctx;
 }
 
-void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
+void setup_gpu_ctx(verify_ctx_t* cur_ctx,
                    const gpu_Elems* elems,
                    uint32_t num_elems,
                    uint32_t message_size,
@@ -115,20 +84,25 @@ void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
                    const uint32_t* signature_offsets,
                    const uint32_t* message_start_offsets,
                    size_t out_size,
-                   cudaStream_t stream) {
-    
-    verify_ctx_t* cur_ctx = &gpu_ctx->verify_ctx;
+                   cudaStream_t stream
+                   ) {
     size_t offsets_size = total_signatures * sizeof(uint32_t);
 
-    if (cur_ctx->packets == NULL || total_packets_size > cur_ctx->packets_size_bytes) {
+    LOG("device allocate. packets: %d out: %d offsets_size: %zu\n",
+        total_packets_size, (int)out_size, offsets_size);
+
+    if (cur_ctx->packets == NULL ||
+        total_packets_size > cur_ctx->packets_size_bytes) {
         CUDA_CHK(cudaFree(cur_ctx->packets));
         CUDA_CHK(cudaMalloc(&cur_ctx->packets, total_packets_size));
+
         cur_ctx->packets_size_bytes = total_packets_size;
     }
 
     if (cur_ctx->out == NULL || cur_ctx->out_size_bytes < out_size) {
         CUDA_CHK(cudaFree(cur_ctx->out));
         CUDA_CHK(cudaMalloc(&cur_ctx->out, out_size));
+
         cur_ctx->out_size_bytes = total_signatures;
     }
 
@@ -148,6 +122,8 @@ void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
         cur_ctx->offsets_len = total_signatures;
     }
 
+    LOG("Done alloc");
+
     CUDA_CHK(cudaMemcpyAsync(cur_ctx->public_key_offsets, public_key_offsets, offsets_size, cudaMemcpyHostToDevice, stream));
     CUDA_CHK(cudaMemcpyAsync(cur_ctx->signature_offsets, signature_offsets, offsets_size, cudaMemcpyHostToDevice, stream));
     CUDA_CHK(cudaMemcpyAsync(cur_ctx->message_start_offsets, message_start_offsets, offsets_size, cudaMemcpyHostToDevice, stream));
@@ -155,14 +131,12 @@ void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
 
     size_t cur = 0;
     for (size_t i = 0; i < num_elems; i++) {
-        CUDA_CHK(cudaMemcpyAsync(&cur_ctx->packets[cur * message_size], 
-                                elems[i].elems, 
-                                elems[i].num * message_size, 
-                                cudaMemcpyHostToDevice, 
-                                stream));
+        LOG("i: %zu size: %d\n", i, elems[i].num * message_size);
+        CUDA_CHK(cudaMemcpyAsync(&cur_ctx->packets[cur * message_size], elems[i].elems, elems[i].num * message_size, cudaMemcpyHostToDevice, stream));
         cur += elems[i].num;
     }
 }
+
 
 void release_gpu_ctx(gpu_ctx_t* cur_ctx) {
     pthread_mutex_unlock(&cur_ctx->mutex);
