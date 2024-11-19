@@ -36,7 +36,7 @@ typedef struct {
 
 void            vanity_setup(config& vanity);
 void            vanity_run(config& vanity);
-void __global__ vanity_init(unsigned long long int* seed, curandState* state);
+void __global__ vanity_init(unsigned long long int seed, curandState* state);
 void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* execution_count);
 bool __device__ b58enc(char* b58, size_t* b58sz, uint8_t* data, size_t binsz);
 
@@ -83,6 +83,7 @@ void vanity_setup(config &vanity) {
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
 	vanity.gpuCount = deviceCount;
+	printf("Detected %d GPUs\n", deviceCount);
 	
 	// Initialize curand states for each GPU
 	for (int i = 0; i < vanity.gpuCount; ++i) {
@@ -109,11 +110,11 @@ void vanity_setup(config &vanity) {
 		// Store the states in our config
 		vanity.states[i] = states;
 		
-		printf("GPU %d: %s initialized with %d blocks of %d threads\n", 
-			   i, device.name, minGridSize, blockSize);
+		printf("GPU %d: %s -- W: %d, P: %d, TPB: %d\n", 
+			   i, device.name, device.warpSize, device.multiProcessorCount, device.maxThreadsPerBlock);
 	}
 	
-	printf("Initialization complete with %d GPUs\n", vanity.gpuCount);
+	printf("END: Initializing Memory\n");
 }
 
 void vanity_run(config &vanity) {
@@ -223,9 +224,9 @@ void vanity_run(config &vanity) {
 
 /* -- CUDA Vanity Functions ------------------------------------------------- */
 
-void __global__ vanity_init(unsigned long long int* rseed, curandState* state) {
+void __global__ vanity_init(unsigned long long int seed, curandState* state) {
 	int id = threadIdx.x + (blockIdx.x * blockDim.x);  
-	curand_init(*rseed + id, id, 0, &state[id]);
+	curand_init(seed, id, 0, &state[id]);
 }
 
 void __global__ vanity_scan(curandState* state, int* keys_found, int* gpu, int* exec_count) {
