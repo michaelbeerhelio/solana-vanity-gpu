@@ -15,10 +15,26 @@ static int32_t g_total_gpus = -1;
 
 static bool cuda_crypt_init_locked() {
     if (g_total_gpus == -1) {
-        cudaGetDeviceCount(&g_total_gpus);
+        // Get GPU count from environment variable if available
+        const char* ray_gpu_ids = getenv("CUDA_VISIBLE_DEVICES");
+        if (ray_gpu_ids) {
+            printf("Ray GPU IDs: %s\n", ray_gpu_ids);
+        }
+        
+        cudaError_t err = cudaGetDeviceCount(&g_total_gpus);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Failed to get GPU count: %s\n", cudaGetErrorString(err));
+            return false;
+        }
+        
+        printf("Detected %d CUDA devices\n", g_total_gpus);
         g_total_gpus = min(MAX_NUM_GPUS, g_total_gpus);
-        LOG("total_gpus: %d\n", g_total_gpus);
+        
         for (int gpu = 0; gpu < g_total_gpus; gpu++) {
+            cudaDeviceProp prop;
+            CUDA_CHK(cudaGetDeviceProperties(&prop, gpu));
+            printf("GPU %d: %s\n", gpu, prop.name);
+            
             CUDA_CHK(cudaSetDevice(gpu));
             for (int queue = 0; queue < MAX_QUEUE_SIZE; queue++) {
                 int err = pthread_mutex_init(&g_gpu_ctx[gpu][queue].mutex, NULL);
