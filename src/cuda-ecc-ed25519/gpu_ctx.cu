@@ -110,7 +110,7 @@ gpu_ctx_t* get_gpu_ctx() {
     return cur_ctx;
 }
 
-void setup_gpu_ctx(verify_ctx_t* cur_ctx,
+void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
                    const gpu_Elems* elems,
                    uint32_t num_elems,
                    uint32_t message_size,
@@ -124,6 +124,7 @@ void setup_gpu_ctx(verify_ctx_t* cur_ctx,
                    size_t out_size,
                    cudaStream_t stream) {
     
+    verify_ctx_t* cur_ctx = &gpu_ctx->verify_ctx;
     size_t offsets_size = total_signatures * sizeof(uint32_t);
 
     if (cur_ctx->packets == NULL || total_packets_size > cur_ctx->packets_size_bytes) {

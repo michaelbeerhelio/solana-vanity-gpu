@@ -31,7 +31,7 @@ extern int32_t g_total_gpus;
 bool cuda_crypt_init();
 bool ed25519_init();
 gpu_ctx_t* get_gpu_ctx();
-void setup_gpu_ctx(verify_ctx_t* cur_ctx,
+void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
                    const gpu_Elems* elems,
                    uint32_t num_elems,
                    uint32_t message_size,
