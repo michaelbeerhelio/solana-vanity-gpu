@@ -84,11 +84,9 @@ bool ed25519_init() {
 gpu_ctx_t* get_gpu_ctx() {
     int32_t cur_gpu, cur_queue;
 
-    LOG("locking global mutex");
     pthread_mutex_lock(&g_ctx_mutex);
     if (!cuda_crypt_init_locked()) {
         pthread_mutex_unlock(&g_ctx_mutex);
-        LOG("No GPUs, exiting...\n");
         return NULL;
     }
     cur_gpu = g_cur_gpu;
@@ -100,13 +98,8 @@ gpu_ctx_t* get_gpu_ctx() {
     pthread_mutex_unlock(&g_ctx_mutex);
 
     gpu_ctx_t* cur_ctx = &g_gpu_ctx[cur_gpu][cur_queue];
-    LOG("locking contex mutex queue: %d gpu: %d", cur_queue, cur_gpu);
     pthread_mutex_lock(&cur_ctx->mutex);
-
-    CUDA_CHK(cudaSetDevice(cur_gpu));
-
-    LOG("selecting gpu: %d queue: %d\n", cur_gpu, cur_queue);
-
+    cudaSetDevice(cur_gpu);
     return cur_ctx;
 }
 
@@ -170,7 +163,6 @@ void setup_gpu_ctx(gpu_ctx_t* gpu_ctx,
         cur += elems[i].num;
     }
 }
-
 
 void release_gpu_ctx(gpu_ctx_t* cur_ctx) {
     pthread_mutex_unlock(&cur_ctx->mutex);
