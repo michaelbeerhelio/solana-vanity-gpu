@@ -79,19 +79,19 @@ unsigned long long int makeSeed() {
 void vanity_setup(config &vanity) {
 	printf("GPU: Initializing Memory\n");
 	
-	// Force CUDA to initialize all devices
-	int deviceCount;
-	cudaGetDeviceCount(&deviceCount);
-	vanity.gpuCount = deviceCount;
-	printf("Detected %d GPUs\n", deviceCount);
+	// Initialize CUDA context first
+	if (!cuda_crypt_init()) {
+		fprintf(stderr, "Failed to initialize CUDA context\n");
+		exit(1);
+	}
+	
+	// Get the number of GPUs from the initialized context
+	vanity.gpuCount = g_total_gpus;
+	printf("Using %d GPUs from CUDA context\n", vanity.gpuCount);
 	
 	// Initialize curand states for each GPU
 	for (int i = 0; i < vanity.gpuCount; ++i) {
 		cudaSetDevice(i);
-		
-		// Get device properties
-		cudaDeviceProp device;
-		cudaGetDeviceProperties(&device, i);
 		
 		// Calculate number of threads per block and blocks per grid
 		int blockSize = 0, minGridSize = 0;
@@ -106,12 +106,10 @@ void vanity_setup(config &vanity) {
 		unsigned long long int seed = makeSeed();
 		printf("Initialising GPU %d from entropy: %llu\n", i, seed);
 		vanity_init<<<minGridSize, blockSize>>>(seed, states);
+		cudaDeviceSynchronize();
 		
 		// Store the states in our config
 		vanity.states[i] = states;
-		
-		printf("GPU %d: %s -- W: %d, P: %d, TPB: %d\n", 
-			   i, device.name, device.warpSize, device.multiProcessorCount, device.maxThreadsPerBlock);
 	}
 	
 	printf("END: Initializing Memory\n");

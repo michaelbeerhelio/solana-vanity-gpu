@@ -17,7 +17,7 @@ static bool cuda_crypt_init_locked() {
     if (g_total_gpus == -1) {
         // Reset all devices first
         cudaDeviceReset();
-        
+        LOG("total_gpus: %d\n", g_total_gpus);
         const char* visible_devices = getenv("CUDA_VISIBLE_DEVICES");
         if (visible_devices) {
             printf("CUDA_VISIBLE_DEVICES: %s\n", visible_devices);
