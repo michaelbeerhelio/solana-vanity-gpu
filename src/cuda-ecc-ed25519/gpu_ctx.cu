@@ -122,25 +122,19 @@ void setup_gpu_ctx(verify_ctx_t* cur_ctx,
                    const uint32_t* signature_offsets,
                    const uint32_t* message_start_offsets,
                    size_t out_size,
-                   cudaStream_t stream
-                   ) {
+                   cudaStream_t stream) {
+    
     size_t offsets_size = total_signatures * sizeof(uint32_t);
 
-    LOG("device allocate. packets: %d out: %d offsets_size: %zu\n",
-        total_packets_size, (int)out_size, offsets_size);
-
-    if (cur_ctx->packets == NULL ||
-        total_packets_size > cur_ctx->packets_size_bytes) {
+    if (cur_ctx->packets == NULL || total_packets_size > cur_ctx->packets_size_bytes) {
         CUDA_CHK(cudaFree(cur_ctx->packets));
         CUDA_CHK(cudaMalloc(&cur_ctx->packets, total_packets_size));
-
         cur_ctx->packets_size_bytes = total_packets_size;
     }
 
     if (cur_ctx->out == NULL || cur_ctx->out_size_bytes < out_size) {
         CUDA_CHK(cudaFree(cur_ctx->out));
         CUDA_CHK(cudaMalloc(&cur_ctx->out, out_size));
-
         cur_ctx->out_size_bytes = total_signatures;
     }
 
@@ -160,8 +154,6 @@ void setup_gpu_ctx(verify_ctx_t* cur_ctx,
         cur_ctx->offsets_len = total_signatures;
     }
 
-    LOG("Done alloc");
-
     CUDA_CHK(cudaMemcpyAsync(cur_ctx->public_key_offsets, public_key_offsets, offsets_size, cudaMemcpyHostToDevice, stream));
     CUDA_CHK(cudaMemcpyAsync(cur_ctx->signature_offsets, signature_offsets, offsets_size, cudaMemcpyHostToDevice, stream));
     CUDA_CHK(cudaMemcpyAsync(cur_ctx->message_start_offsets, message_start_offsets, offsets_size, cudaMemcpyHostToDevice, stream));
@@ -169,8 +161,11 @@ void setup_gpu_ctx(verify_ctx_t* cur_ctx,
 
     size_t cur = 0;
     for (size_t i = 0; i < num_elems; i++) {
-        LOG("i: %zu size: %d\n", i, elems[i].num * message_size);
-        CUDA_CHK(cudaMemcpyAsync(&cur_ctx->packets[cur * message_size], elems[i].elems, elems[i].num * message_size, cudaMemcpyHostToDevice, stream));
+        CUDA_CHK(cudaMemcpyAsync(&cur_ctx->packets[cur * message_size], 
+                                elems[i].elems, 
+                                elems[i].num * message_size, 
+                                cudaMemcpyHostToDevice, 
+                                stream));
         cur += elems[i].num;
     }
 }
