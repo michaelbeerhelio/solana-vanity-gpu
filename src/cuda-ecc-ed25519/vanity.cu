@@ -162,11 +162,9 @@ void vanity_run(config &vanity) {
 	unsigned long long int  executions_total = 0; 
 	unsigned long long int  executions_this_iteration; 
 	int  executions_this_gpu; 
-        int* dev_executions_this_gpu[100];
 
-        int  keys_found_total = 0;
-        int  keys_found_this_iteration;
-        int* dev_keys_found[100];
+	int  keys_found_total = 0;
+	int  keys_found_this_iteration;
 
 	for (int i = 0; i < MAX_ITERATIONS; ++i) {
 		auto start  = std::chrono::high_resolution_clock::now();
