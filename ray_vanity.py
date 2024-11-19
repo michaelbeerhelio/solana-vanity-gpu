@@ -3,10 +3,22 @@ import ctypes
 from pathlib import Path
 import os
 
-@ray.remote(num_gpus=1)
+@ray.remote(
+    num_gpus=1,
+    runtime_env={
+        "working_dir": ".",
+        "py_modules": [],
+        "excludes": ["**/__pycache__"]
+    }
+)
 class VanityGenerator:
     def __init__(self):
-        lib_path = Path.home() / "solana-vanity-gpu/src/release/libcuda-ed25519-vanity.so"
+        # Get current working directory from Ray
+        cwd = os.getcwd()
+        print(f"Current working directory: {cwd}")
+        print(f"Directory contents: {os.listdir(cwd)}")
+        
+        lib_path = Path(cwd) / "src" / "release" / "libcuda-ed25519-vanity.so"
         if not lib_path.exists():
             raise RuntimeError(f"CUDA library not found at {lib_path}")
             
