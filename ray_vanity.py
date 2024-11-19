@@ -5,8 +5,18 @@ import os
 
 # Load the CUDA library
 def load_cuda_lib():
+    # Get absolute paths
     project_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     lib_path = project_dir / "src" / "release" / "libcuda-ed25519-vanity.so"
+    
+    # For Ray workers, copy library to /tmp
+    worker_lib_path = Path("/tmp/libcuda-ed25519-vanity.so")
+    
+    if lib_path.exists():
+        # Copy library to tmp for Ray workers
+        import shutil
+        shutil.copy2(lib_path, worker_lib_path)
+        lib_path = worker_lib_path
     
     if not lib_path.exists():
         raise RuntimeError(f"CUDA library not found at {lib_path}")
@@ -14,11 +24,8 @@ def load_cuda_lib():
     lib = ctypes.CDLL(str(lib_path))
     
     # Define function signatures
-    lib.create_config.argtypes = [ctypes.c_int]
-    lib.create_config.restype = ctypes.c_void_p
-    
-    lib.vanity_setup_gpu.argtypes = [ctypes.c_void_p]
-    lib.vanity_run_gpu.argtypes = [ctypes.c_void_p]
+    lib.init_vanity.argtypes = [ctypes.c_int]
+    lib.init_vanity.restype = None
     
     return lib
 
@@ -27,12 +34,11 @@ class VanityGenerator:
     def __init__(self):
         self.lib = load_cuda_lib()
         self.gpu_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
-        self.config = self.lib.create_config(self.gpu_id)
+        print(f"Initialized VanityGenerator on GPU {self.gpu_id}")
         
     def generate(self):
         print(f"Starting generation on GPU {self.gpu_id}")
-        self.lib.vanity_setup_gpu(self.config)
-        self.lib.vanity_run_gpu(self.config)
+        self.lib.init_vanity(self.gpu_id)
 
 def main():
     ray.init()
