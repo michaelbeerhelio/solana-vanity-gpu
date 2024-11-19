@@ -3,13 +3,7 @@ import ctypes
 from pathlib import Path
 import os
 
-@ray.remote(
-    num_gpus=1,
-    runtime_env={
-        "working_dir": ".",
-        "excludes": ["**/cuda_ed25519_vanity"]
-    }
-)
+@ray.remote(num_gpus=1)
 class VanityGenerator:
     def __init__(self):
         lib_path = Path("src/release/libcuda-ed25519-vanity.so")
@@ -28,8 +22,14 @@ class VanityGenerator:
         self.lib.init_vanity(0)
 
 def main():
-    # Initialize Ray first
-    ray.init(address='auto')
+    # Initialize Ray with runtime environment
+    ray.init(
+        address='auto',
+        runtime_env={
+            "working_dir": ".",
+            "excludes": ["**/cuda_ed25519_vanity"]
+        }
+    )
     
     # Get available GPUs
     gpu_count = int(ray.available_resources().get('GPU', 0))
@@ -38,10 +38,7 @@ def main():
     
     print(f"Found {gpu_count} GPUs")
     
-    # Create generators for each GPU
     generators = [VanityGenerator.remote() for _ in range(gpu_count)]
-    
-    # Run generators in parallel
     ray.get([g.generate.remote() for g in generators])
 
 if __name__ == "__main__":
