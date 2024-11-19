@@ -28,15 +28,18 @@ class VanityGenerator:
             raise RuntimeError(f"CUDA library not found at {lib_path}")
             
         self.lib = ctypes.CDLL(str(lib_path))
-        self.lib.init_vanity.argtypes = [ctypes.c_int]
-        self.lib.init_vanity.restype = None
+        self.lib.vanity_setup.argtypes = [ctypes.c_int]
+        self.lib.vanity_setup.restype = None
+        self.lib.vanity_run.argtypes = [ctypes.c_int]
+        self.lib.vanity_run.restype = None
         
         self.gpu_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0"))
         print(f"Initialized VanityGenerator on GPU {self.gpu_id}")
         
     def generate(self):
         print(f"Starting generation on GPU {self.gpu_id}")
-        self.lib.init_vanity(self.gpu_id)
+        self.lib.vanity_setup(self.gpu_id)
+        self.lib.vanity_run(self.gpu_id)
 
 def main():
     # Initialize Ray with runtime environment
