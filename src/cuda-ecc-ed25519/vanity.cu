@@ -559,4 +559,11 @@ extern "C" {
     void vanity_run_gpu(config* cfg) {
         vanity_run(*cfg);
     }
+
+    void init_vanity(int gpu_id) {
+        config vanity;
+        vanity.gpu_id = gpu_id;
+        vanity_setup(vanity);
+        vanity_run(vanity);
+    }
 }

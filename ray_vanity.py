@@ -6,27 +6,19 @@ import os
 # Load the CUDA library
 def load_cuda_lib():
     # Get absolute paths
-    project_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    lib_path = project_dir / "src" / "release" / "libcuda-ed25519-vanity.so"
+    project_dir = os.path.abspath("/home/ray/solana-vanity-gpu")
+    lib_path = Path(project_dir) / "src" / "release" / "libcuda-ed25519-vanity.so"
     
-    # For Ray workers, copy library to /tmp
-    worker_lib_path = Path("/tmp/libcuda-ed25519-vanity.so")
-    
-    if lib_path.exists():
-        # Copy library to tmp for Ray workers
-        import shutil
-        shutil.copy2(lib_path, worker_lib_path)
-        lib_path = worker_lib_path
+    print(f"Looking for library at: {lib_path}")
+    print(f"Current directory: {os.getcwd()}")
+    print(f"Files in current directory: {os.listdir('.')}")
     
     if not lib_path.exists():
         raise RuntimeError(f"CUDA library not found at {lib_path}")
     
     lib = ctypes.CDLL(str(lib_path))
-    
-    # Define function signatures
     lib.init_vanity.argtypes = [ctypes.c_int]
     lib.init_vanity.restype = None
-    
     return lib
 
 @ray.remote(num_gpus=1)
