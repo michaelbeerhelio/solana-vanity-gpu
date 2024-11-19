@@ -10,6 +10,7 @@
 typedef struct {
     pthread_mutex_t mutex;
     cudaStream_t stream;
+    verify_ctx_t verify_ctx;
 } gpu_ctx_t;
 
 typedef struct {
@@ -24,11 +25,6 @@ typedef struct {
     size_t out_size_bytes;
     size_t offsets_len;
 } verify_ctx_t;
-
-typedef struct {
-    void* elems;
-    size_t num;
-} gpu_Elems;
 
 extern int32_t g_total_gpus;
 bool cuda_crypt_init();
