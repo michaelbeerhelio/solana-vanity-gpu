@@ -78,21 +78,42 @@ unsigned long long int makeSeed() {
 
 void vanity_setup(config &vanity) {
 	printf("GPU: Initializing Memory\n");
-	cudaGetDeviceCount(&vanity.gpuCount);
-	printf("Detected %d GPUs\n", vanity.gpuCount);
-
-	// Create random states for each GPU
+	
+	// Force CUDA to initialize all devices
+	int deviceCount;
+	cudaGetDeviceCount(&deviceCount);
+	vanity.gpuCount = deviceCount;
+	
+	// Initialize curand states for each GPU
 	for (int i = 0; i < vanity.gpuCount; ++i) {
 		cudaSetDevice(i);
+		
+		// Get device properties
 		cudaDeviceProp device;
 		cudaGetDeviceProperties(&device, i);
-		printf("GPU: %d (%s) -- W: %d, P: %d, TPB: %d, MTD: (%dx, %dy, %dz), MGS: (%dx, %dy, %dz)\n",
-			i, device.name, device.warpSize, device.multiProcessorCount, device.maxThreadsPerBlock,
-			device.maxThreadsDim[0], device.maxThreadsDim[1], device.maxThreadsDim[2],
-			device.maxGridSize[0], device.maxGridSize[1], device.maxGridSize[2]);
 		
-		// Rest of your initialization code...
+		// Calculate number of threads per block and blocks per grid
+		int blockSize = 0, minGridSize = 0;
+		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
+		
+		// Allocate and initialize random states for this GPU
+		curandState* states;
+		int numThreads = blockSize * minGridSize;
+		cudaMalloc(&states, numThreads * sizeof(curandState));
+		
+		// Initialize random states
+		unsigned long long int seed = makeSeed();
+		printf("Initialising GPU %d from entropy: %llu\n", i, seed);
+		vanity_init<<<minGridSize, blockSize>>>(seed, states);
+		
+		// Store the states in our config
+		vanity.states[i] = states;
+		
+		printf("GPU %d: %s initialized with %d blocks of %d threads\n", 
+			   i, device.name, minGridSize, blockSize);
 	}
+	
+	printf("Initialization complete with %d GPUs\n", vanity.gpuCount);
 }
 
 void vanity_run(config &vanity) {
@@ -103,11 +124,21 @@ void vanity_run(config &vanity) {
 	int* dev_executions_this_gpu[MAX_NUM_GPUS] = {nullptr};
 	
 	for (int g = 0; g < vanity.gpuCount; ++g) {
-		cudaSetDevice(g);
+		cudaError_t err = cudaSetDevice(g);
+		if (err != cudaSuccess) {
+			fprintf(stderr, "Failed to set device %d: %s\n", g, cudaGetErrorString(err));
+			continue;
+		}
+		
 		cudaMalloc(&dev_keys_found[g], sizeof(int));
 		cudaMalloc(&dev_executions_this_gpu[g], sizeof(int));
 		cudaMemset(dev_keys_found[g], 0, sizeof(int));
 		cudaMemset(dev_executions_this_gpu[g], 0, sizeof(int));
+		
+		// Verify device is still set correctly
+		int currentDevice;
+		cudaGetDevice(&currentDevice);
+		printf("Initialized memory for GPU %d (current device: %d)\n", g, currentDevice);
 	}
 
 	unsigned long long int  executions_total = 0; 
