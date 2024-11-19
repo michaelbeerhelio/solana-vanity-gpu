@@ -152,20 +152,38 @@ void vanity_run(config &vanity) {
 
         int  keys_found_total = 0;
         int  keys_found_this_iteration;
-        int* dev_keys_found[100]; // not more than 100 GPUs ok!
+        int* dev_keys_found[100];
+
+    // Initialize device memory outside the loop
+    for (int g = 0; g < gpuCount; ++g) {
+        cudaSetDevice(g);
+        
+        // Allocate and initialize keys found counter
+        cudaMalloc((void**)&dev_keys_found[g], sizeof(int));
+        int zero = 0;
+        cudaMemcpy(dev_keys_found[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
+        
+        // Allocate and initialize executions counter
+        cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));
+        cudaMemcpy(dev_executions_this_gpu[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
+    }
 
 	for (int i = 0; i < MAX_ITERATIONS; ++i) {
 		auto start  = std::chrono::high_resolution_clock::now();
 
                 executions_this_iteration=0;
 
+		// Reset counters at the start of each iteration
+		for (int g = 0; g < gpuCount; ++g) {
+			int zero = 0;
+			cudaMemcpy(dev_keys_found[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
+			cudaMemcpy(dev_executions_this_gpu[g], &zero, sizeof(int), cudaMemcpyHostToDevice);
+		}
+
 		// Run on all GPUs
 		for (int g = 0; g < gpuCount; ++g) {
 			cudaSetDevice(g);
-			// Calculate Occupancy
-			int blockSize       = 0,
-			    minGridSize     = 0,
-			    maxActiveBlocks = 0;
+			int blockSize = 0, minGridSize = 0, maxActiveBlocks = 0;
 			cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, vanity_scan, 0, 0);
 			cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxActiveBlocks, vanity_scan, blockSize, 0);
 
@@ -177,7 +195,7 @@ void vanity_run(config &vanity) {
 	                cudaMalloc((void**)&dev_executions_this_gpu[g], sizeof(int));		
 
 			vanity_scan<<<maxActiveBlocks, blockSize>>>(vanity.states[g], dev_keys_found[g], dev_g, dev_executions_this_gpu[g]);
-
+			cudaFree(dev_g);
 		}
 
 		// Synchronize while we wait for kernels to complete. I do not
