@@ -2,16 +2,29 @@ import ray
 import ctypes
 from pathlib import Path
 import os
+import tempfile
+import shutil
+
+def prepare_package():
+    # Create a temporary directory
+    temp_dir = tempfile.mkdtemp()
+    pkg_dir = Path(temp_dir) / "vanity_pkg"
+    pkg_dir.mkdir()
+    
+    # Copy necessary files
+    shutil.copy("src/release/libcuda-ed25519-vanity.so", pkg_dir)
+    
+    # Create package
+    pkg_uri = ray.runtime_env.upload_package_to_gcs(
+        str(pkg_dir), include_parent_dir=False
+    )
+    shutil.rmtree(temp_dir)
+    return pkg_uri
 
 @ray.remote(num_gpus=1)
 class VanityGenerator:
     def __init__(self):
-        # Get current working directory from Ray
-        cwd = os.getcwd()
-        print(f"Current working directory: {cwd}")
-        print(f"Directory contents: {os.listdir(cwd)}")
-        
-        lib_path = Path(cwd) / "src" / "release" / "libcuda-ed25519-vanity.so"
+        lib_path = Path("libcuda-ed25519-vanity.so")
         if not lib_path.exists():
             raise RuntimeError(f"CUDA library not found at {lib_path}")
             
@@ -27,15 +40,14 @@ class VanityGenerator:
         self.lib.init_vanity(0)
 
 def main():
-    # Initialize Ray with runtime environment
-    ray.init(
-        address='auto',
-        runtime_env={
-            "working_dir": ".",
-            "py_modules": [],
-            "excludes": ["**/__pycache__"]
-        }
-    )
+    # Initialize Ray
+    ray.init(address='auto')
+    
+    # Upload package and get URI
+    pkg_uri = prepare_package()
+    
+    # Create runtime environment
+    runtime_env = {"uris": {pkg_uri: None}}
     
     gpu_count = int(ray.available_resources().get('GPU', 0))
     if gpu_count == 0:
@@ -43,7 +55,12 @@ def main():
     
     print(f"Found {gpu_count} GPUs")
     
-    generators = [VanityGenerator.remote() for _ in range(gpu_count)]
+    # Create generators with runtime environment
+    VanityGeneratorWithEnv = ray.remote(
+        runtime_env=runtime_env
+    )(VanityGenerator)
+    
+    generators = [VanityGeneratorWithEnv.remote() for _ in range(gpu_count)]
     ray.get([g.generate.remote() for g in generators])
 
 if __name__ == "__main__":
